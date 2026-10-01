@@ -323,6 +323,18 @@ func (c *Client) Active() bool { return c.player.active() }
 // Buffered is how much audio is queued and not yet played.
 func (c *Client) Buffered() time.Duration { return c.player.buffered() }
 
+// SyncDiag takes the connected server's time-exchange summary since the last
+// call; false with no server connected.
+func (c *Client) SyncDiag() (SyncDiag, bool) {
+	c.mu.Lock()
+	s := c.admitted
+	c.mu.Unlock()
+	if s == nil {
+		return SyncDiag{}, false
+	}
+	return s.filter.takeDiag(), true
+}
+
 func (c *Client) hello() clientHello {
 	return clientHello{
 		Name:           c.cfg.Name,
