@@ -308,15 +308,23 @@ func (c *Client) applySettings(p playerSettings) {
 
 // Fill is the speaker's pull: one stereo period whose first frame reaches the
 // DAC at playAt, as MEASURED — it is smoothed here (OutputClock), so the
-// caller passes its raw reading. False when there is nothing to play then.
+// caller passes its raw reading, and how uncertain that reading is. A reading
+// the scheduler interrupted is not learned from: the tracker coasts on its
+// prediction for that period. False when there is nothing to play then.
 // Called from one goroutine only.
-func (c *Client) Fill(out []byte, playAt time.Time) bool {
+func (c *Client) Fill(out []byte, playAt time.Time, uncertain time.Duration) bool {
 	oc := c.oc.Load()
 	if oc == nil {
 		oc = NewOutputClock(time.Duration(len(out)/4) * time.Second / outRate)
 		c.oc.Store(oc)
 	}
-	return c.player.Fill(out, oc.Observe(playAt))
+	var at time.Time
+	if uncertain > outClockTrust {
+		at = oc.Coast(playAt)
+	} else {
+		at = oc.Observe(playAt)
+	}
+	return c.player.Fill(out, at)
 }
 
 // Active reports whether Sendspin has audio queued: the speaker's cue that

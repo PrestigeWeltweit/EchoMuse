@@ -179,8 +179,8 @@ func logSendspinSync(c *sendspin.Client) {
 	log.Printf("[sendspin] sync: n=%d delay=%d..%dus meas=%d..%dus offset=%dus drift=%.2fppm",
 		d.N, d.DelayMinUs, d.DelayMaxUs, d.MeasMinUs, d.MeasMaxUs, d.OffsetUs, d.DriftPpm)
 	o := c.OutDiag()
-	log.Printf("[sendspin] dac: n=%d resid=%d..%dus big=%d nudgeMax=%dus resets=%d rate=%.1fppm",
-		o.N, o.ResidMinUs, o.ResidMaxUs, o.BigResid, o.NudgeMaxUs, o.Resets, o.RatePpm)
+	log.Printf("[sendspin] dac: n=%d resid=%d..%dus big=%d nudgeMax=%dus gated=%d coasted=%d resets=%d rate=%.1fppm",
+		o.N, o.ResidMinUs, o.ResidMaxUs, o.BigResid, o.NudgeMaxUs, o.Gated, o.Coasted, o.Resets, o.RatePpm)
 }
 
 // sendspinMusic is the player's share of what the BLE duty cycle weighs:

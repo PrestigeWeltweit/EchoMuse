@@ -68,3 +68,79 @@ func TestOutDiagWindow(t *testing.T) {
 		t.Fatalf("window not reset: %+v", again)
 	}
 }
+
+// The C95 failure (#707): one ALSA delay reading 18ms early, inside the 20ms
+// reset bound. Before the gate it swung the rate estimate to -1022ppm and the
+// scheduler chased the error for a minute; now the estimate must not move
+// past the scheduler's ~100µs deadband at any point after it.
+func TestOutputClockIgnoresASingleOutlier(t *testing.T) {
+	period := time.Duration(2048) * time.Second / 48000
+	for _, outlier := range []time.Duration{-18 * time.Millisecond, -5 * time.Millisecond, 10 * time.Millisecond} {
+		c := NewOutputClock(period)
+		rng := rand.New(rand.NewSource(707))
+		t0 := epoch.Add(time.Hour)
+		worst := time.Duration(0)
+		for k := 0; k < 1500; k++ {
+			truth := t0.Add(time.Duration(k) * period)
+			meas := truth.Add(time.Duration((rng.Float64()*2 - 1) * float64(300*time.Microsecond)))
+			if k == 800 {
+				meas = truth.Add(outlier)
+			}
+			got := c.Observe(meas)
+			if k >= 800 {
+				d := got.Sub(truth)
+				if d < 0 {
+					d = -d
+				}
+				worst = max(worst, d)
+			}
+		}
+		if worst > 104*time.Microsecond {
+			t.Errorf("outlier %v: estimate moved up to %v after it", outlier, worst)
+		}
+		if d := c.TakeDiag(); d.Gated != 1 || d.Resets != 0 {
+			t.Errorf("outlier %v: gated %d, resets %d; want 1 and 0", outlier, d.Gated, d.Resets)
+		}
+	}
+}
+
+// A shift that persists is the DAC really moving (an xrun shorter than the
+// 20ms reset): follow it once it has held for outClockGateRun periods.
+func TestOutputClockFollowsASustainedShift(t *testing.T) {
+	period := 42 * time.Millisecond
+	c := NewOutputClock(period)
+	t0 := epoch.Add(time.Hour)
+	for k := 0; k < 100; k++ {
+		c.Observe(t0.Add(time.Duration(k) * period))
+	}
+	shift := 8 * time.Millisecond
+	var got, want time.Time
+	for k := 100; k < 100+outClockGateRun; k++ {
+		want = t0.Add(time.Duration(k)*period + shift)
+		got = c.Observe(want)
+	}
+	if !got.Equal(want) {
+		t.Errorf("after %d shifted readings the estimate is %v off", outClockGateRun, got.Sub(want))
+	}
+}
+
+// A reading too uncertain to learn from moves the estimate by one period and
+// nothing else, however far off it is.
+func TestOutputClockCoastsThroughAnUncertainReading(t *testing.T) {
+	period := 42 * time.Millisecond
+	c := NewOutputClock(period)
+	t0 := epoch.Add(time.Hour)
+	for k := 0; k < 100; k++ {
+		c.Observe(t0.Add(time.Duration(k) * period))
+	}
+	want := t0.Add(100 * period)
+	if got := c.Coast(want.Add(15 * time.Millisecond)); !got.Equal(want) {
+		t.Errorf("coasted estimate is %v off the prediction", got.Sub(want))
+	}
+	if got := c.Observe(t0.Add(101 * period)); got.Sub(t0.Add(101*period)).Abs() > time.Microsecond {
+		t.Errorf("after coasting, the next reading is %v off", got.Sub(t0.Add(101*period)))
+	}
+	if d := c.TakeDiag(); d.Coasted != 1 {
+		t.Errorf("coasted = %d, want 1", d.Coasted)
+	}
+}
