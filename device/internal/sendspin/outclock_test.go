@@ -49,3 +49,22 @@ func TestOutputClockFollowsAJump(t *testing.T) {
 		t.Errorf("after a 100ms jump, estimate is %v off", got.Sub(jumped))
 	}
 }
+
+func TestOutDiagWindow(t *testing.T) {
+	per := 42667 * time.Microsecond
+	c := NewOutputClock(per)
+	t0 := time.Unix(0, 0)
+	for i := 0; i < 50; i++ {
+		c.Observe(t0.Add(time.Duration(i) * per))
+	}
+	c.TakeDiag()                                     // converged; start a clean window
+	c.Observe(t0.Add(50*per + 300*time.Microsecond)) // one measurement 300µs off
+	c.Observe(t0.Add(51*per + 30*time.Millisecond))  // a jump: resets the loop
+	d := c.TakeDiag()
+	if d.N != 2 || d.BigResid != 2 || d.Resets != 1 || d.ResidMaxUs < 29000 || d.NudgeMaxUs == 0 {
+		t.Fatalf("diag = %+v", d)
+	}
+	if again := c.TakeDiag(); again.N != 0 {
+		t.Fatalf("window not reset: %+v", again)
+	}
+}
